@@ -1,0 +1,101 @@
+---
+title: "Next Box"
+author: "Joe Stoica"
+date: "6/29/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(chron)
+library(dplyr)
+library(ggthemes)
+library(plotly)
+```
+
+```{r data}
+# Set Timezone
+Sys.setenv(TZ='EST')
+
+# Allow the user to select a data file
+datafile <- file.choose()
+
+# Reading in the data 
+box.data <- read.csv(datafile,
+                     sep = " ",
+                     header = FALSE,
+                     col.names = c("RFID", "date", "time"),
+                     colClasses = c("RFID" = "character",
+                                    "date" = "character",
+                                    "time" = "character"),
+                     skip = 1) # Skip the meta data at the top of the TXT
+
+# Formats date into mdy
+box.data$date <- as.Date(box.data$date, format = "%m/%d/%y")
+
+# Formats time into hms 
+box.data$time <- chron(times = box.data$time)
+box.data$time <- hms(box.data$time)
+
+# Creates the datetime column
+box.data$datetime <- ISOdatetime(year = year(box.data$date),
+                                 month = month(box.data$date),
+                                 day = day(box.data$date), 
+                                 hour = hour(box.data$time),
+                                 min = 00,
+                                 sec = 00)
+
+# Import lookup table
+RFID.lookup <- read.csv("RFID.csv",
+                        header = TRUE)
+
+box.data <- box.data %>%
+  select(-time) %>% 
+  # Joins the initial data frame with the RFID.lookup table by RFID
+  left_join(RFID.lookup, by = "RFID")
+
+# Recode missing birds' info from the lookup as "?"
+box.data[is.na(box.data)] <- "?"
+```
+
+```{r plotting}
+# This is the data that ggplot will read. 
+toplot <- box.data %>%
+  # Changes the ID column into the Bird's band ID and sex
+  mutate(BAND = ifelse(is.na(box.data$BAND), 
+                       paste(box.data$RFID), 
+                       paste(box.data$BAND))) %>% 
+  # We want to see these three columns
+  select(BAND, datetime, Sex) %>% 
+  # Ensure they're grouped correctly 
+  group_by(BAND, datetime, Sex) %>% 
+  # Count the number of occurrences
+  count() %>% 
+  # Sort in ascending order
+  arrange(datetime)
+
+p <- ggplot(toplot, aes(x = datetime, 
+                        y = n,
+                        fill = BAND, 
+                        label = Sex)) +
+  scale_fill_manual(values = c("#80b1d3","#b3de69","#fb8072", "#8dd3c7", 
+                               "#ffffb3","#bebada","#fdb462","#fccde5",
+                               "#d9d9d9", "red")) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Tree Swallow Activity at Nest Box",
+       y = "Number of Actions at Nest Box") +
+  # Adjusts the time scale ticks
+  scale_x_datetime(breaks = seq(min(toplot$datetime), 
+                                max(toplot$datetime), 
+                                by = 3600*3)) +
+  theme_fivethirtyeight() +
+  theme(legend.position = "none",
+        axis.title.y=element_blank())  
+
+ggplotly(p)
+```
+
